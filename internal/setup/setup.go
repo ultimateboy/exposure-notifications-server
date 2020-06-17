@@ -23,6 +23,7 @@ import (
 	"github.com/google/exposure-notifications-server/internal/database"
 	"github.com/google/exposure-notifications-server/internal/logging"
 	"github.com/google/exposure-notifications-server/internal/metrics"
+	"github.com/google/exposure-notifications-server/internal/observability"
 	"github.com/google/exposure-notifications-server/internal/secrets"
 	"github.com/google/exposure-notifications-server/internal/serverenv"
 	"github.com/google/exposure-notifications-server/internal/signing"
@@ -58,6 +59,12 @@ type KeyManagerConfigProvider interface {
 // secret manager.
 type SecretManagerConfigProvider interface {
 	SecretManagerConfig() *secrets.Config
+}
+
+// ObservabilityExporterConfigProvider signals that the config knows how to configure an
+// observability exporter.
+type ObservabilityExporterConfigProvider interface {
+	ObservabilityExporterConfig() *observability.Config
 }
 
 // Setup runs common initialization code for all servers. See SetupWith.
@@ -201,6 +208,21 @@ func SetupWith(ctx context.Context, config interface{}, l envconfig.Lookuper) (*
 
 			logger.Infow("authorizedapp", "config", aaConfig)
 		}
+	}
+
+	// Configure and initialize the observability exporter.
+	if provider, ok := config.(ObservabilityExporterConfigProvider); ok {
+		logger.Info("configuring observability exporter")
+		oeConfig := provider.ObservabilityExporterConfig()
+		oe, err := observability.NewFromEnv(ctx, oeConfig)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create ObservabilityExporter provider: %v", err)
+		}
+		oe.InitOnce()
+
+		serverEnvOpts = append(serverEnvOpts, serverenv.WithObservabilityExporter(oe))
+
+		logger.Infow("observability exporter", "config", oeConfig)
 	}
 
 	return serverenv.New(ctx, serverEnvOpts...), nil
